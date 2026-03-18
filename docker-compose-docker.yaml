@@ -1,0 +1,74 @@
+services:
+  postgres:
+    image: postgres:16.13-alpine3.23
+    container_name: teamclaw-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: teamclaw
+      POSTGRES_USER: teamclaw
+      POSTGRES_PASSWORD: teamclaw_dev_password
+      TZ: Asia/Shanghai
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U teamclaw -d teamclaw"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  docker-0.docker:
+    image: docker:29.3.0-dind-alpine3.23
+    container_name: teamclaw-docker-0
+    privileged: true
+    restart: unless-stopped
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    command:
+      - --host=tcp://0.0.0.0:2376
+      - --tlsverify
+      - --tlscacert=/certs/ca.crt
+      - --tlscert=/certs/tls.crt
+      - --tlskey=/certs/tls.key
+    volumes:
+      - ./certs:/certs:ro
+      - ./workspaces:/workspaces
+      - ./skills/agent:/agent_skills
+
+  docker-1.docker:
+    image: docker:29.3.0-dind-alpine3.23
+    container_name: teamclaw-docker-1
+    privileged: true
+    restart: unless-stopped
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    command:
+      - --host=tcp://0.0.0.0:2376
+      - --tlsverify
+      - --tlscacert=/certs/ca.crt
+      - --tlscert=/certs/tls.crt
+      - --tlskey=/certs/tls.key
+    volumes:
+      - ./certs:/certs:ro
+      - ./workspaces:/workspaces
+      - ./skills/agent:/agent_skills
+
+  teamclaw:
+    image: cookeem/teamclaw:v0.5.0
+    container_name: teamclaw
+    restart: unless-stopped
+    environment:
+      TEAMCLAW_DB_HOST: "postgres"
+      TEAMCLAW_FRONTEND_BASE_URL: "http://localhost:8080/frontend"
+    ports:
+      - "8000:8000"
+      - "8080:8080"
+    volumes:
+      - ./config-docker.yaml:/app/config.yaml:ro
+      - ./uploads:/app/uploads
+      - ./skills:/app/skills
+      - ./certs:/app/certs:ro
+      - ./workspaces:/app/workspaces
+    depends_on:
+      - postgres
+      - docker-0.docker
+      - docker-1.docker
