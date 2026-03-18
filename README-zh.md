@@ -88,7 +88,7 @@ cd teamclaw
 sh docker_certs.sh
 
 # 启动 postgres / docker-0.docker / docker-1.docker
-docker compose -f docker-compose-docker.yaml up -d
+docker compose up -d
 
 # 使用venv创建虚拟环境，并安装相关依赖
 # 假如要使用 openai / ollama 之外的模型

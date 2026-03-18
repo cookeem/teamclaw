@@ -88,7 +88,7 @@ cd teamclaw
 sh docker_certs.sh
 
 # Start postgres / docker-0.docker / docker-1.docker
-docker compose -f docker-compose-docker.yaml up -d
+docker compose up -d
 
 # Create venv and install dependencies
 # If you need models beyond openai / ollama,
