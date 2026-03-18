@@ -61,23 +61,23 @@ services:
       - ./skills/agent:/agent_skills
       - ./skills-builtin:/skills-builtin:ro
 
-  teamclaw:
-    image: cookeem/teamclaw:v0.5.0
-    container_name: teamclaw
-    restart: unless-stopped
-    environment:
-      TEAMCLAW_DB_HOST: "postgres"
-      TEAMCLAW_FRONTEND_BASE_URL: "http://localhost:8080/frontend"
-    ports:
-      - "8000:8000"
-      - "8080:8080"
-    volumes:
-      - ./config.yaml:/app/config.yaml:ro
-      - ./uploads:/app/uploads
-      - ./skills:/app/skills
-      - ./certs:/app/certs:ro
-      - ./workspaces:/app/workspaces
-    depends_on:
-      - postgres
-      - docker-0.docker
-      - docker-1.docker
+  # teamclaw:
+  #   image: cookeem/teamclaw:v0.5.0
+  #   container_name: teamclaw
+  #   restart: unless-stopped
+  #   environment:
+  #     TEAMCLAW_DB_HOST: "postgres"
+  #     TEAMCLAW_FRONTEND_BASE_URL: "http://localhost:8080/frontend"
+  #   ports:
+  #     - "8000:8000"
+  #     - "8080:8080"
+  #   volumes:
+  #     - ./config.yaml:/app/config.yaml:ro
+  #     - ./uploads:/app/uploads
+  #     - ./skills:/app/skills
+  #     - ./certs:/app/certs:ro
+  #     - ./workspaces:/app/workspaces
+  #   depends_on:
+  #     - postgres
+  #     - docker-0.docker
+  #     - docker-1.docker
