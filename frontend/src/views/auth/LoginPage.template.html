@@ -1,0 +1,53 @@
+<v-container class="auth-scene" fluid>
+  <section class="auth-panel">
+    <header class="auth-header">
+      <div class="auth-brand">
+        <img class="auth-brand-logo" src="/images/teamclaw_logo.png" alt="TeamClaw logo" />
+        <h1 class="auth-brand-text">TeamClaw</h1>
+        <span v-if="appVersion" class="auth-brand-version">{{ appVersion }}</span>
+      </div>
+      <v-select
+        :model-value="locale"
+        :items="localeItems"
+        item-title="title"
+        item-value="value"
+        variant="outlined"
+        density="comfortable"
+        hide-details
+        class="auth-language"
+        @update:model-value="setLocale"
+      />
+    </header>
+
+    <nav class="auth-tabs">
+      <router-link to="/login" class="auth-tab active">{{ t("auth.login") }}</router-link>
+      <router-link to="/signup" class="auth-tab">{{ t("auth.signup") }}</router-link>
+      <router-link to="/forgot-password" class="auth-tab">{{ t("auth.forgotPassword") }}</router-link>
+    </nav>
+
+    <div class="auth-form">
+      <v-text-field v-model="account" :placeholder="t('auth.usernameOrEmail')" variant="outlined" hide-details />
+      <v-text-field
+        v-model="password"
+        :placeholder="t('auth.password')"
+        type="password"
+        variant="outlined"
+        hide-details
+        @keydown.enter="submit"
+      />
+
+      <v-alert v-if="errorText" type="error" variant="tonal" density="compact">{{ errorText }}</v-alert>
+
+      <v-btn
+        color="#d4513e"
+        rounded="sm"
+        :loading="loading"
+        :disabled="!canSubmit"
+        class="auth-submit text-white"
+        @click="submit"
+      >
+        {{ t("auth.login") }}
+      </v-btn>
+    </div>
+  </section>
+</v-container>

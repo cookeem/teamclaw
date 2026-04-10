@@ -1,0 +1,38 @@
+<v-container class="new-chat-shell py-6" fluid>
+  <h1 class="new-chat-title">{{ t("createChat.title") }}</h1>
+
+  <v-card class="new-chat-panel pa-4">
+    <v-row dense align="center">
+      <v-col cols="12" md="4">
+        <v-text-field
+          v-model="title"
+          :label="t('createChat.nameOptional')"
+          variant="outlined"
+          density="comfortable"
+          hide-details
+        />
+      </v-col>
+
+      <v-col cols="12" md="4">
+        <v-select
+          v-model="selectedModelKey"
+          :items="modelItems"
+          :label="t('createChat.model')"
+          variant="outlined"
+          density="comfortable"
+          hide-details
+        />
+      </v-col>
+
+      <v-col cols="12" md="4" class="d-flex justify-end">
+        <v-btn color="#d4513e" class="text-white new-chat-submit" :loading="creating" @click="createAndEnter">
+          {{ t("createChat.createEnter") }}
+        </v-btn>
+      </v-col>
+    </v-row>
+
+    <v-alert v-if="errorText" type="error" variant="tonal" density="compact" class="mt-3">
+      {{ errorText }}
+    </v-alert>
+  </v-card>
+</v-container>

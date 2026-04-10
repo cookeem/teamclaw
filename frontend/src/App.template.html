@@ -1,0 +1,266 @@
+<v-app class="app-shell" :class="{ 'auth-shell': isAuthRoute }">
+  <div class="atmosphere teal"></div>
+  <div class="atmosphere orange"></div>
+
+  <template v-if="isAuthRoute">
+    <v-main>
+      <router-view />
+    </v-main>
+  </template>
+
+  <template v-else>
+    <v-layout class="workspace-layout">
+      <v-navigation-drawer permanent width="292" class="left-drawer">
+        <div class="brand">
+          <img class="brand-logo" src="/images/teamclaw_logo.png" alt="TeamClaw logo" />
+          <span>TeamClaw</span>
+          <span v-if="appVersion" class="brand-version">{{ appVersion }}</span>
+        </div>
+
+        <v-list nav density="comfortable" class="drawer-nav">
+          <v-list-item
+            prepend-icon="mdi-plus-circle-outline"
+            :title="t('nav.newChat')"
+            rounded="lg"
+            :active="$route.path === '/app/chats/new'"
+            @click="goNewChat"
+          />
+
+          <v-list-group
+            v-if="auth.isAdmin.value"
+            value="admin"
+            prepend-icon="mdi-shield-account"
+            class="admin-group"
+          >
+            <template #activator="{ props }">
+              <v-list-item v-bind="props" :title="t('nav.adminConsole')" rounded="lg" />
+            </template>
+            <v-list-item
+              prepend-icon="mdi-account-cog-outline"
+              :title="t('nav.userManagement')"
+              to="/admin/users"
+              rounded="lg"
+            />
+          </v-list-group>
+        </v-list>
+
+        <div class="chat-section-title">{{ t("sidebar.chatList") }}</div>
+        <v-divider class="mx-3 mb-1" />
+
+        <div class="conversation-scroll">
+          <v-list nav density="comfortable" class="drawer-nav">
+            <v-list-item
+              v-for="item in conversations"
+              :key="item.id"
+              :title="item.title"
+              :prepend-icon="item.is_pinned ? 'mdi-pin' : 'mdi-message-outline'"
+              :active="activeConversationId === item.id"
+              rounded="lg"
+              @click="openConversation(item.id)"
+            >
+              <template #append>
+                <v-menu location="bottom end">
+                  <template #activator="{ props }">
+                    <v-btn icon="mdi-dots-vertical" variant="text" size="small" v-bind="props" @click.stop />
+                  </template>
+                  <v-list density="compact">
+                    <v-list-item :title="t('sidebar.rename')" prepend-icon="mdi-pencil" @click.stop="openRenameConversationDialog(item)" />
+                    <v-list-item
+                      :title="item.is_pinned ? t('sidebar.unpin') : t('sidebar.pin')"
+                      :prepend-icon="item.is_pinned ? 'mdi-pin-off' : 'mdi-pin'"
+                      @click.stop="togglePinConversation(item)"
+                    />
+                  </v-list>
+                </v-menu>
+              </template>
+            </v-list-item>
+          </v-list>
+          <v-progress-linear v-if="sidebarLoading" indeterminate color="primary" class="mx-4 mt-2" />
+          <v-alert v-if="sidebarError" type="error" variant="tonal" density="compact" class="mx-3 mt-2 mb-3">
+            {{ sidebarError }}
+          </v-alert>
+        </div>
+      </v-navigation-drawer>
+
+      <v-main class="main-scroll" :class="{ 'chat-route-main': isChatRoute }">
+        <v-app-bar flat class="top-bar">
+          <v-app-bar-title>
+            <div class="top-brand">
+              <img class="top-brand-logo" src="/images/teamclaw_logo.png" alt="TeamClaw logo" />
+              <span>TeamClaw</span>
+            </div>
+          </v-app-bar-title>
+
+          <v-spacer />
+
+          <v-select
+            :model-value="locale"
+            :items="localeItems"
+            item-title="title"
+            item-value="value"
+            density="compact"
+            variant="outlined"
+            hide-details
+            class="lang-select"
+            @update:model-value="setLocale"
+          />
+
+          <v-btn variant="text" class="profile-btn" @click="openProfileDialog">
+            <v-avatar size="28" class="mr-2">
+              <img v-if="userAvatarUrl" class="avatar-media" :src="userAvatarUrl" alt="avatar" />
+              <span v-else>{{ userInitials() }}</span>
+            </v-avatar>
+            <span>{{ displayName }}</span>
+          </v-btn>
+          <v-btn variant="text" @click="handleLogout">{{ t("nav.logout") }}</v-btn>
+        </v-app-bar>
+
+        <div class="route-content" :class="{ 'chat-route-content': isChatRoute }">
+          <router-view />
+        </div>
+
+        <v-dialog v-model="renameDialog" max-width="520">
+          <v-card>
+            <v-card-title class="text-h6 font-weight-bold">{{ t("sidebar.rename") }}</v-card-title>
+            <v-card-text class="pt-2">
+              <v-text-field
+                v-model="renameValue"
+                :label="t('sidebar.renamePrompt')"
+                variant="outlined"
+                hide-details
+                autofocus
+                @keydown.enter.prevent="submitRenameConversation"
+              />
+            </v-card-text>
+            <v-card-actions class="px-6 pb-5">
+              <v-spacer />
+              <v-btn variant="text" :disabled="renameSaving" @click="closeRenameConversationDialog">
+                {{ t("common.cancel") }}
+              </v-btn>
+              <v-btn variant="flat" :loading="renameSaving" :disabled="!canSubmitRename" @click="submitRenameConversation">
+                {{ t("common.confirm") }}
+              </v-btn>
+            </v-card-actions>
+          </v-card>
+        </v-dialog>
+
+        <v-dialog v-model="profileDialog" max-width="760">
+          <v-card class="profile-dialog-card">
+            <v-card-title class="text-h6 font-weight-bold">{{ t("profile.title") }}</v-card-title>
+            <v-card-subtitle>{{ t("profile.subtitle") }}</v-card-subtitle>
+            <v-card-text class="d-flex flex-column ga-3 pt-3">
+              <v-text-field v-model="profileForm.username" :label="t('profile.username')" variant="outlined" readonly />
+              <v-text-field v-model="profileForm.display_name" :label="t('profile.displayName')" variant="outlined" />
+              <v-text-field v-model="profileForm.email" :label="t('profile.email')" variant="outlined" />
+
+              <div class="profile-avatar-row">
+                <v-avatar size="72" class="profile-avatar-preview">
+                  <img v-if="profileAvatarPreviewUrl" class="avatar-media" :src="profileAvatarPreviewUrl" alt="profile avatar" />
+                  <span v-else>{{ userInitials() }}</span>
+                </v-avatar>
+                <div class="profile-avatar-fields">
+                  <v-file-input
+                    v-model="profileAvatarFile"
+                    :label="t('profile.changeAvatar')"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    variant="outlined"
+                    density="comfortable"
+                    prepend-icon="mdi-camera"
+                    show-size
+                    hide-details
+                    @update:model-value="onAvatarFileChange"
+                  />
+                  <div class="profile-avatar-tip">{{ t("profile.cropHint") }}</div>
+                </div>
+              </div>
+
+              <v-divider class="my-1" />
+              <v-text-field
+                v-model="profileForm.current_password"
+                :label="t('profile.currentPassword')"
+                type="password"
+                variant="outlined"
+              />
+              <v-text-field
+                v-model="profileForm.new_password"
+                :label="t('profile.newPassword')"
+                type="password"
+                variant="outlined"
+              />
+              <v-text-field
+                v-model="profileForm.confirm_password"
+                :label="t('profile.confirmPassword')"
+                type="password"
+                variant="outlined"
+              />
+              <v-alert v-if="profilePasswordMismatch" type="warning" variant="tonal" density="compact">
+                {{ t("auth.passwordMismatch") }}
+              </v-alert>
+              <v-alert v-if="profileError" type="error" variant="tonal" density="compact">
+                {{ profileError }}
+              </v-alert>
+              <v-alert v-if="profileSuccess" type="success" variant="tonal" density="compact">
+                {{ profileSuccess }}
+              </v-alert>
+            </v-card-text>
+            <v-card-actions class="px-6 pb-5">
+              <v-spacer />
+              <v-btn variant="text" @click="closeProfileDialog">{{ t("common.close") }}</v-btn>
+              <v-btn
+                variant="flat"
+                :loading="profileSaving || profileLoading"
+                :disabled="!canSaveProfile"
+                @click="saveProfile"
+              >
+                {{ t("profile.save") }}
+              </v-btn>
+            </v-card-actions>
+          </v-card>
+        </v-dialog>
+
+        <v-dialog v-model="avatarCropDialog" max-width="980">
+          <v-card class="avatar-crop-card">
+            <v-card-title class="text-h6 font-weight-bold">{{ t("profile.cropTitle") }}</v-card-title>
+            <v-card-text>
+              <div class="profile-avatar-tip mb-3">{{ t("profile.cropHint") }}</div>
+              <div
+                class="avatar-crop-stage"
+                @pointermove="onAvatarCropPointerMove"
+                @pointerup="stopAvatarCropDrag"
+                @pointercancel="stopAvatarCropDrag"
+                @pointerleave="stopAvatarCropDrag"
+              >
+                <div class="avatar-crop-canvas">
+                <img
+                  v-if="avatarCropImageUrl"
+                  ref="avatarCropImageRef"
+                  class="avatar-crop-image"
+                  :src="avatarCropImageUrl"
+                  alt="avatar to crop"
+                  draggable="false"
+                    @load="onAvatarImageLoaded"
+                  />
+                  <div class="avatar-crop-rect" :style="avatarCropRectStyle" @pointerdown.prevent="startAvatarCropDrag" />
+                </div>
+              </div>
+              <v-slider
+                v-model="avatarCropScale"
+                :label="t('profile.cropScale')"
+                min="35"
+                max="95"
+                step="1"
+                hide-details
+                class="mt-4"
+              />
+            </v-card-text>
+            <v-card-actions class="px-6 pb-5">
+              <v-spacer />
+              <v-btn variant="text" @click="closeCropDialog">{{ t("common.cancel") }}</v-btn>
+              <v-btn variant="flat" @click="confirmAvatarCrop">{{ t("common.confirm") }}</v-btn>
+            </v-card-actions>
+          </v-card>
+        </v-dialog>
+      </v-main>
+    </v-layout>
+  </template>
+</v-app>

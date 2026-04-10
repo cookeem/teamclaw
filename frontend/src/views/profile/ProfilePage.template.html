@@ -1,0 +1,25 @@
+<v-container class="page-wrap py-6" fluid>
+  <v-row justify="center">
+    <v-col cols="12" md="8" lg="6">
+      <v-card class="panel-card pa-4">
+        <v-card-title class="text-h6 font-weight-bold">{{ t("profile.title") }}</v-card-title>
+        <v-card-subtitle>{{ t("profile.subtitle") }}</v-card-subtitle>
+
+        <v-card-text class="d-flex flex-column ga-3 mt-2">
+          <v-text-field v-model="form.display_name" :label="t('profile.displayName')" variant="outlined" />
+          <v-text-field v-model="form.username" :label="t('profile.username')" variant="outlined" readonly />
+          <v-text-field v-model="form.email" :label="t('profile.email')" variant="outlined" />
+          <v-divider class="my-2" />
+          <v-text-field v-model="form.current_password" :label="t('profile.currentPassword')" type="password" variant="outlined" />
+          <v-text-field v-model="form.new_password" :label="t('profile.newPassword')" type="password" variant="outlined" />
+          <v-text-field v-model="form.confirm_password" :label="t('profile.confirmPassword')" type="password" variant="outlined" />
+
+          <v-alert v-if="errorText" type="error" variant="tonal">{{ errorText }}</v-alert>
+          <v-alert v-if="successText" type="success" variant="tonal">{{ successText }}</v-alert>
+
+          <v-btn color="primary" :loading="saving" @click="save">{{ t("profile.save") }}</v-btn>
+        </v-card-text>
+      </v-card>
+    </v-col>
+  </v-row>
+</v-container>

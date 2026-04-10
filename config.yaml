@@ -1,7 +1,33 @@
-# API keys
-api_keys:
-  # internet_search tools require tavily api key, get it from https://www.tavily.com/ and put it here.
-  tavily: "xxxxxx"
+app:
+  # backend API response language: en | zh
+  language: "en"
+  # user avatar upload directory (relative to config.yaml)
+  avatars_dir: "avatars"
+  # 登录会话设置
+  session:
+    # 用户超过该秒数不活跃后，要求重新登录（3600 = 1小时）
+    idle_timeout_seconds: 3600
+    # 活跃时间写库节流间隔（秒）
+    touch_interval_seconds: 60
+  # 每个用户默认对话数量上限
+  # -1: 不限制；0: 禁止创建新对话；>0: 允许创建的最大对话数
+  default_user_conversation_limit: 4
+  debug:
+    llm_message: true
+  prompts:
+    # 是否启用外部提示词目录
+    enabled: true
+    # 提示词目录（相对于 config.yaml 所在目录）
+    dir: "prompts"
+    # system prompt 文件名
+    system_file: "system.md"
+    # 行为规则文件名（追加到 system prompt 之后）
+    behavior_file: "behavior.md"
+    # system.md 的使用模式:
+    # - append: deepagents 默认 system prompt + system.md + behavior.md
+    # - override: 仅使用 system.md（再追加 behavior.md）
+    system_mode: "append"
+    version: "v0.6.2"
 
 # SMTP settings (password reset emails)
 smtp:
@@ -15,6 +41,16 @@ smtp:
   use_tls: false
   use_ssl: true
   timeout_seconds: 15
+  reset_subject: "TeamClaw Password Reset"
+  reset_url_template: "http://cookeem.com:8080/forgot-password?code={code}&email={email}"
+
+database:
+  host: "127.0.0.1"
+  port: 5432
+  username: "teamclaw"
+  password: "teamclaw_dev_password"
+  dbname: "teamclaw"
+  echo: false
 
 # LLM model settings
 # Notes:
@@ -33,31 +69,9 @@ models:
       # # Official OpenAI:
       # base_url: "https://api.openai.com/v1"
       # api_key: "sk-xxxx"
-      #
-      # # Ali Dashscope compatible mode (free/test):
-      # base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-      # api_key: "sk-xxxx"
-      #
+      # # ###############################
       # # Ali Dashscope coding (paid):
-      # base_url: "https://coding.dashscope.aliyuncs.com/v1"
-      # api_key: "sk-sp-86d129e98f964d679c5bc198cbb06f81"
-      # models:
-      #   - "qwen3.5-plus"
-      #   - "qwen3-max-2026-01-23"
-      #   - "qwen3-coder-next"
-      #   - "qwen3-coder-plus"
-      #   - "MiniMax-M2.5"
-      #   - "glm-5"
-      #   # - "gpt-4.1"
-      #   # - "gpt-4o"
-      #   # - "gpt-5"
-      # params:
-      #   temperature: 0
-      #   max_tokens: 4096
-      #   qwen3.5-plus:
-      #     temperature: 0.7
-      # #
-      # GMCC MaaS:
+      # # ###############################
       base_url: "http://example.com/v1"
       api_key: "xxxx"
       models:
@@ -67,7 +81,7 @@ models:
         max_tokens: 4096
         qwen3.5-plus:
           temperature: 0.7
-      
+
 
     # -----------------------------
     # Other provider templates (disabled by default)
@@ -177,57 +191,39 @@ models:
     #   params:
     #     temperature: 0
 
-# TeamClaw unified configuration
-app:
-  name: "teamclaw-backend"
-  # UI/API locale: "en" (English, default) or "zh" (Chinese)
-  locale: "en"
-  env: "development"
-  host: "0.0.0.0"
-  port: 8000
-  debug: true
-  frontend_base_url: "http://localhost:8080/frontend"
-
-# Auth settings
-auth:
-  # Dev-only: when enabled, forgot-password returns the verification code and reset token.
-  expose_password_reset_debug: false
-
-# PostgreSQL connection
-database:
-  host: "127.0.0.1"
-  port: 5432
-  user: "teamclaw"
-  password: "teamclaw_dev_password"
-  name: "teamclaw"
-
-# Skills
-skills:
-  enabled: true
-  directories:
-    - "./skills-builtin"
-
-# Skill storage directories
-skill_storage:
-  userskills_dir: "./skills/user"
-  preskills_dir: "./skills/prepublish"
-  skills_dir: "./skills/published"
-  agentskills_dir: "./skills/agent"
-  conversationskills_dir: "./skills/conversation"
-
-# Agent behavior
-agent:
-  interrupt_on:
-    write_file: true
-    edit_file: true
-    terminal: true
-
-# Docker container
+# Docker sandbox settings
 docker:
-  enabled: true
-  image: "python:3.12-slim"
-  container_name_prefix: "teamclaw-exec"
-  workspace_root: "./workspaces"
+  # dockersandbox使用的容器镜像
+  image: "cookeem/teamclaw-sandbox:v0.6.0"
+  # dockersandbox使用的容器名称的前缀
+  container_name_prefix: "teamclaw-sandbox"
+  # dockersandbox挂装哪个目录作为租户们的工作目录，这个目录下边会为每个对话创建一个子目录，例如workspaces/<对话id>
+  # dockersandbox挂装对话子目录（例如workspaces/<对话id>）到容器中的workdir，例如/workspace
+  # 不启用Remote Docker daemon (dind)情况下生效
+  workspace_root: "workspaces"
+  # dockersandbox的对话工作空间目录
+  workdir: "/workspace"
+  # dockersandbox挂装内置skill目录到容器中的<workdir>/<skills_builtin_dir>，例如/workspace/skills-builtin
+  # 不启用Remote Docker daemon (dind)情况下生效
+  skills_builtin_dir: "skills-builtin"
+  # dockersandbox挂装用户skill目录到容器中的<workdir>/skills，例如/workspace/skills
+  # 不启用Remote Docker daemon (dind)情况下生效
+  skills_user_dir: "skills/user"
+  # readonly_workdir: false
+  # auto_remove: false
+  timeout: 300
+  client_timeout: 10
+  # sandbox CPU配额，单位核（支持小数），例如 0.5 / 1 / 2
+  cpu_limit: 0.5
+  # sandbox内存配额，支持字节或带单位（k/m/g/t, ki/mi/gi/ti），例如 512m / 2g
+  memory_limit: "256m"
+  # sandbox容器内的主机名解析（/etc/hosts）
+  hostnames:
+    - "api.internal:10.0.0.10"
+    - "db.internal:10.0.0.11"
+  environment:
+    - "PYTHONUNBUFFERED=1"
+    - "TZ=Asia/Shanghai"
   # Remote Docker daemon (dind) settings
   daemon_hosts:
     - name: "dind-0"
@@ -235,17 +231,20 @@ docker:
     - name: "dind-1"
       host: "tcp://127.0.0.1:12377"
   daemon_workspace_root: "/workspaces"
-  tls:
+  daemon_skills_builtin_dir: "/skills-builtin"
+  daemon_skills_user_dir: "/skills/user"
+  daemon_tls:
     enabled: true
-    certs_dir: "./certs"
-    ca_cert: "./certs/ca.crt"
-    client_cert: "./certs/tls.crt"
-    client_key: "./certs/tls.key"
+    certs_dir: "certs"
+    ca_cert: "certs/ca.crt"
+    client_cert: "certs/tls.crt"
+    client_key: "certs/tls.key"
     verify: true
-  workdir: "/workspace"
-  readonly_workdir: false
-  auto_remove: true
-  timeout: 300
-  client_timeout: 10
-  environment:
-    - "PYTHONUNBUFFERED=1"
+
+scheduled_tasks:
+  enabled: true
+  poll_interval_seconds: 10
+  batch_size: 3
+  llm_wait_timeout_seconds: 1800
+  max_script_output_chars: 20000
+  max_summary_input_chars: 12000

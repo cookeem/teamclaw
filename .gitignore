@@ -12,6 +12,7 @@ go.work.sum
 
 # Python
 venv/
+.venv/
 __pycache__/
 *.py[cod]
 *$py.class
@@ -40,6 +41,10 @@ wheels/
 *.swo
 *~
 
+# Node
+node_modules/
+frontend/dist/
+
 # OS
 .DS_Store
 Thumbs.db
@@ -48,7 +53,10 @@ Thumbs.db
 data/
 uploads/
 workspaces/
+avatars/
 skills/
 certs/
-m0demo
 config.json
+deepagents/
+demo/
+logs/

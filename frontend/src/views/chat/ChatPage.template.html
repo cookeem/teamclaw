@@ -1,0 +1,990 @@
+<v-container fluid class="layout-grid pa-0">
+  <div class="chat-page-grid">
+    <section class="chat-main-col">
+      <div class="chat-main-shell">
+        <div ref="chatViewport" class="chat-viewport">
+          <transition-group name="msg-fade" tag="div" class="message-list">
+            <div
+              v-for="message in messages"
+              :key="message.id"
+              :id="messageDomId(message.id)"
+              class="message-row"
+              :class="[`role-${message.role}`, { 'message-row-targeted': focusedMessageId === message.id }]"
+            >
+              <div
+                v-if="message.role !== 'user'"
+                class="message-avatar"
+                :class="`avatar-${message.role}`"
+                :title="message.role === 'assistant' ? 'TeamClaw Assistant' : 'System'"
+              >
+                <img
+                  v-if="messageAvatarSrc(message.role)"
+                  class="avatar-media"
+                  :src="messageAvatarSrc(message.role) || ''"
+                  :alt="message.role === 'assistant' ? 'assistant avatar' : 'system avatar'"
+                />
+                <span v-else>{{ messageAvatarText(message.role) }}</span>
+              </div>
+
+              <v-sheet
+                class="message-bubble"
+                :class="{ loading: message.loading }"
+                :color="bubbleColor(message.role)"
+                rounded="lg"
+              >
+                <v-chip
+                  v-if="message.scheduledTag"
+                  size="x-small"
+                  color="secondary"
+                  variant="tonal"
+                  class="mb-2"
+                >
+                  {{ scheduledTagLabel(message.scheduledTag) }}
+                </v-chip>
+                <div class="bubble-text markdown-content" v-html="messageHtml(message)"></div>
+                <div v-if="message.attachments.length > 0" class="message-attachments">
+                  <div v-for="item in message.attachments" :key="`${message.id}-${item.path}`" class="message-attachment-item">
+                    <img
+                      v-if="item.kind === 'image'"
+                      class="message-attachment-image"
+                      :src="attachmentPreviewUrl(item)"
+                      :alt="item.name"
+                      loading="lazy"
+                    />
+                    <a
+                      class="message-attachment-link"
+                      :href="attachmentDownloadUrl(item)"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {{ item.name }} · {{ formatAttachmentSize(item.size) }}
+                    </a>
+                  </div>
+                </div>
+
+                <div v-if="showToolMessages && message.toolCalls.length > 0" class="tool-trace">
+                  <v-sheet
+                    v-for="tool in message.toolCalls"
+                    :key="`${message.id}-${tool.id}`"
+                    class="tool-item"
+                    rounded="sm"
+                    color="rgba(17,24,39,0.04)"
+                  >
+                    <div class="tool-item-head">
+                      <span class="tool-dot"></span>
+                      <code class="tool-call">{{ tool.display }}</code>
+                      <v-chip
+                        v-if="tool.hasResult"
+                        size="x-small"
+                        :color="tool.status === 'error' ? 'error' : 'success'"
+                        variant="flat"
+                      >
+                        {{ toolStatusLabel(tool.status) }}
+                      </v-chip>
+                    </div>
+                    <div v-if="toolCallMetaText(tool)" class="tool-time">
+                      {{ toolCallMetaText(tool) }}
+                    </div>
+
+                    <div v-if="tool.hasResult" class="tool-item-body">
+                      <pre class="tool-output">{{ visibleToolOutput(tool) }}</pre>
+                      <v-btn
+                        v-if="isCollapsible(tool)"
+                        size="small"
+                        variant="text"
+                        color="primary"
+                        @click="tool.expanded = !tool.expanded"
+                      >
+                        {{ tool.expanded ? t("chat.collapse") : t("chat.expand") }}
+                      </v-btn>
+                    </div>
+                  </v-sheet>
+                </div>
+
+                <div class="message-meta">{{ messageMeta(message) }}</div>
+              </v-sheet>
+
+              <div
+                v-if="message.role === 'user'"
+                class="message-avatar avatar-user"
+                title="User"
+              >
+                <img
+                  v-if="messageAvatarSrc(message.role)"
+                  class="avatar-media"
+                  :src="messageAvatarSrc(message.role) || ''"
+                  alt="user avatar"
+                />
+                <span v-else>{{ messageAvatarText(message.role) }}</span>
+              </div>
+            </div>
+          </transition-group>
+        </div>
+
+        <div class="composer">
+          <div v-if="pendingAttachments.length > 0" class="composer-attachments">
+            <v-chip
+              v-for="item in pendingAttachments"
+              :key="item.path"
+              size="small"
+              variant="tonal"
+              color="secondary"
+              class="attachment-chip"
+              closable
+              :disabled="busy || uploadingAttachments"
+              @click:close="removePendingAttachment(item.path)"
+            >
+              {{ item.name }} · {{ formatAttachmentSize(item.size) }}
+            </v-chip>
+          </div>
+
+          <div class="composer-row">
+            <input
+              ref="uploadInput"
+              class="sr-only"
+              type="file"
+              multiple
+              @change="onAttachmentInputChange"
+            />
+
+            <v-menu v-model="attachmentMenuOpen" location="top start">
+              <template #activator="{ props }">
+                <v-btn
+                  v-bind="props"
+                  icon="mdi-plus"
+                  variant="tonal"
+                  color="secondary"
+                  :disabled="busy || uploadingAttachments"
+                />
+              </template>
+              <v-list density="compact">
+                <v-list-item prepend-icon="mdi-paperclip" :title="t('chat.uploadFiles')" @click="openAttachmentPicker" />
+              </v-list>
+            </v-menu>
+
+            <v-textarea
+              v-model="draft"
+              rows="1"
+              max-rows="4"
+              auto-grow
+              hide-details
+              :placeholder="t('chat.inputPlaceholder')"
+              variant="solo-filled"
+              :disabled="busy || uploadingAttachments"
+              @keydown.enter.exact.prevent="sendMessage"
+              @paste="onComposerPaste"
+            />
+            <v-btn
+              v-if="busy"
+              color="error"
+              variant="outlined"
+              prepend-icon="mdi-stop-circle-outline"
+              :disabled="!canInterrupt"
+              :loading="interrupting"
+              @click="interruptRun"
+            >
+              {{ interrupting ? t("chat.stopping") : t("chat.stop") }}
+            </v-btn>
+            <v-btn
+              v-else
+              color="secondary"
+              :disabled="!canSend"
+              :loading="uploadingAttachments"
+              append-icon="mdi-send"
+              @click="sendMessage"
+            >
+              {{ uploadingAttachments ? t("chat.uploadingFiles") : t("chat.send") }}
+            </v-btn>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="chat-settings-col">
+      <div class="panel-shell sticky-settings">
+        <v-tabs v-model="settingsTab" color="secondary" density="compact" class="settings-tabs">
+          <v-tab value="chat-settings">{{ t("chat.settings") }}</v-tab>
+          <v-tab value="files">{{ t("chat.filesTab") }}</v-tab>
+          <v-tab value="skills">{{ t("chat.skillsTab") }}</v-tab>
+          <v-tab value="scheduled-tasks">{{ t("chat.scheduledTasksTab") }}</v-tab>
+        </v-tabs>
+
+        <v-window v-model="settingsTab" class="settings-window">
+          <v-window-item value="chat-settings">
+            <div class="panel-content chat-settings-panel d-flex flex-column ga-4">
+              <div class="panel-subtitle">
+                {{ t("chat.conversationId") }}: <code>{{ conversationId }}</code>
+              </div>
+
+              <v-select
+                v-model="selectedProvider"
+                :items="providerItems"
+                item-title="name"
+                item-value="name"
+                :label="t('chat.provider')"
+                density="comfortable"
+                variant="outlined"
+              />
+
+              <v-select
+                v-model="selectedModel"
+                :items="modelItems"
+                :label="t('chat.model')"
+                density="comfortable"
+                variant="outlined"
+              />
+
+              <v-chip :color="statusColor" variant="flat" class="status-chip">
+                {{ statusLabel }}
+              </v-chip>
+
+              <v-switch
+                v-model="showToolMessages"
+                :label="t('chat.showToolMessages')"
+                color="primary"
+                density="compact"
+                hide-details
+                inset
+              />
+
+              <v-btn color="secondary" variant="outlined" prepend-icon="mdi-restart" @click="restartSandboxNow">
+                {{ t("chat.restartSandbox") }}
+              </v-btn>
+
+              <div class="meta-row">
+                <span>{{ t("chat.sandbox") }}</span>
+                <code>{{ sandboxLabel }}</code>
+                <code>{{ t("chat.sandboxCreatedAt") }}: {{ sandboxCreatedAtLabel }}</code>
+              </div>
+
+              <v-alert v-if="errorText" type="error" variant="tonal" density="compact">{{ errorText }}</v-alert>
+            </div>
+          </v-window-item>
+
+          <v-window-item :value="settingsTab === 'skills' ? 'skills' : 'files'">
+            <div class="panel-content files-panel d-flex flex-column ga-3">
+              <div class="files-toolbar">
+                <v-btn
+                  size="small"
+                  variant="outlined"
+                  prepend-icon="mdi-refresh"
+                  :loading="filesTreeLoading"
+                  :disabled="filesActionLoading"
+                  @click="loadFilesTree"
+                >
+                  {{ t("chat.filesRefresh") }}
+                </v-btn>
+                <v-btn
+                  size="small"
+                  variant="outlined"
+                  prepend-icon="mdi-folder-plus-outline"
+                  :disabled="filesActionLoading"
+                  @click="createDirectoryInSelectedPath"
+                >
+                  {{ t("chat.filesNewFolder") }}
+                </v-btn>
+                <v-btn
+                  size="small"
+                  variant="outlined"
+                  prepend-icon="mdi-file-plus-outline"
+                  :disabled="filesActionLoading"
+                  @click="createTextFileInSelectedPath"
+                >
+                  {{ t("chat.filesNewFile") }}
+                </v-btn>
+                <v-btn
+                  size="small"
+                  variant="outlined"
+                  prepend-icon="mdi-upload"
+                  :disabled="filesActionLoading"
+                  @click="openFileManagerUploadPicker"
+                >
+                  {{ t("chat.filesUpload") }}
+                </v-btn>
+              </div>
+
+              <input
+                ref="fileManagerUploadInput"
+                class="sr-only"
+                type="file"
+                multiple
+                @change="onFileManagerUploadInputChange"
+              />
+
+              <div class="files-target-tip">
+                {{ t("chat.filesTargetDir") }}: <code>{{ selectedUploadDirectory }}</code>
+              </div>
+              <div class="files-sort-row">
+                <v-select
+                  v-model="fileSortField"
+                  :items="fileSortFieldItems"
+                  item-title="title"
+                  item-value="value"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                  :label="t('chat.filesSortBy')"
+                />
+                <v-btn
+                  size="small"
+                  variant="outlined"
+                  prepend-icon="mdi-sort"
+                  :disabled="filesActionLoading"
+                  @click="toggleFileSortDirection"
+                >
+                  {{ fileSortDirection === "asc" ? t("chat.filesSortAsc") : t("chat.filesSortDesc") }}
+                </v-btn>
+              </div>
+
+              <div class="files-scroll-zone">
+                <div class="files-tree-shell">
+                  <div v-if="flatFileRows.length === 0" class="files-empty">
+                    {{ filesTreeLoading ? t("chat.filesLoading") : filesEmptyText }}
+                  </div>
+                  <div
+                    v-for="row in flatFileRows"
+                    :key="row.node.path"
+                    class="file-row"
+                    :class="{ selected: selectedFilePath === row.node.path }"
+                    @click="selectFileNode(row.node)"
+                  >
+                    <div class="file-row-main" :style="fileNodeIndentStyle(row.depth)">
+                      <v-btn
+                        v-if="row.node.node_type === 'directory'"
+                        size="x-small"
+                        variant="text"
+                        :icon="isFileNodeExpanded(row.node.path) ? 'mdi-chevron-down' : 'mdi-chevron-right'"
+                        @click.stop="toggleFileNodeExpand(row.node.path)"
+                      />
+                      <span v-else class="file-row-toggle-placeholder"></span>
+                      <v-icon class="file-row-icon" :icon="fileNodeIcon(row.node)" size="18" />
+                      <span class="file-row-name">{{ row.node.name }}</span>
+                      <span class="file-row-meta">
+                        {{ row.node.node_type === "file" ? formatFileNodeSize(row.node.size) : `${row.node.children.length}` }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="files-selection" v-if="selectedFileNode">
+                  <div class="meta-row">
+                    <span>{{ t("chat.filesSelected") }}</span>
+                    <code>{{ selectedFileNode.path }}</code>
+                  </div>
+                  <div class="meta-row mt-2">
+                    <span>{{ t("chat.filesModified") }}</span>
+                    <code>{{ formatFileNodeMtime(selectedFileNode.modified_at) }}</code>
+                  </div>
+                  <div class="meta-row mt-2">
+                    <span>{{ t("chat.filesCreated") }}</span>
+                    <code>{{ formatFileNodeCtime(selectedFileNode.created_at) }}</code>
+                  </div>
+                  <div class="files-actions mt-3">
+                    <v-btn
+                      v-if="canPreviewSelectedFile"
+                      size="small"
+                      variant="outlined"
+                      prepend-icon="mdi-eye-outline"
+                      :disabled="filesActionLoading || viewFileLoading"
+                      @click="openViewDialogForSelectedFile"
+                    >
+                      {{ t("chat.filesView") }}
+                    </v-btn>
+                    <v-btn
+                      v-if="canEditSelectedTextFile"
+                      size="small"
+                      variant="outlined"
+                      prepend-icon="mdi-file-document-edit-outline"
+                      :disabled="filesActionLoading || editFileLoading"
+                      @click="openTextEditorForSelectedFile"
+                    >
+                      {{ t("chat.filesEditText") }}
+                    </v-btn>
+                    <v-btn
+                      v-if="canRenameSelectedNode"
+                      size="small"
+                      variant="outlined"
+                      prepend-icon="mdi-rename-box"
+                      :disabled="filesActionLoading"
+                      @click="renameSelectedFileNode"
+                    >
+                      {{ t("chat.filesRename") }}
+                    </v-btn>
+                    <v-btn
+                      v-if="canExtractSelectedArchive"
+                      size="small"
+                      variant="outlined"
+                      prepend-icon="mdi-folder-zip-outline"
+                      :disabled="filesActionLoading"
+                      @click="extractSelectedArchiveFile"
+                    >
+                      {{ t("chat.filesExtract") }}
+                    </v-btn>
+                    <v-btn
+                      v-if="canArchiveSelectedDirectory"
+                      size="small"
+                      variant="outlined"
+                      prepend-icon="mdi-archive-arrow-down-outline"
+                      :disabled="filesActionLoading"
+                      @click="archiveSelectedDirectoryNode"
+                    >
+                      {{ t("chat.filesArchive") }}
+                    </v-btn>
+                    <v-btn
+                      v-if="canDeleteSelectedNode"
+                      size="small"
+                      variant="outlined"
+                      prepend-icon="mdi-delete-outline"
+                      color="error"
+                      :disabled="filesActionLoading"
+                      @click="openDeleteFileNodeDialog"
+                    >
+                      {{ t("chat.filesDelete") }}
+                    </v-btn>
+                    <v-btn
+                      v-if="canDownloadSelectedFile"
+                      size="small"
+                      variant="outlined"
+                      prepend-icon="mdi-download"
+                      :disabled="filesActionLoading"
+                      :href="fileNodeDownloadUrl(selectedFileNode.path, selectedFileNode.name)"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {{ t("chat.filesDownload") }}
+                    </v-btn>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </v-window-item>
+
+          <v-window-item value="scheduled-tasks">
+            <div class="panel-content files-panel d-flex flex-column ga-3">
+              <div class="files-toolbar">
+                <v-btn
+                  size="small"
+                  variant="outlined"
+                  prepend-icon="mdi-refresh"
+                  :loading="scheduledTasksLoading"
+                  :disabled="scheduledTaskActionLoading"
+                  @click="loadScheduledTasks"
+                >
+                  {{ t("chat.scheduledTaskRefresh") }}
+                </v-btn>
+                <v-btn
+                  size="small"
+                  variant="outlined"
+                  prepend-icon="mdi-plus-circle-outline"
+                  :disabled="scheduledTaskActionLoading"
+                  @click="openCreateScheduledTaskDialog"
+                >
+                  {{ t("chat.scheduledTaskCreate") }}
+                </v-btn>
+              </div>
+
+              <div class="files-scroll-zone">
+                <div class="files-tree-shell">
+                  <div v-if="scheduledTasks.length === 0" class="files-empty">
+                    {{ scheduledTasksLoading ? t("chat.scheduledTaskLoading") : t("chat.scheduledTaskEmpty") }}
+                  </div>
+                  <div
+                    v-for="task in scheduledTasks"
+                    :key="task.id"
+                    class="file-row"
+                    :class="{ selected: selectedScheduledTaskId === task.id }"
+                    @click="selectScheduledTask(task.id)"
+                  >
+                    <div class="file-row-main">
+                      <v-icon class="file-row-icon" icon="mdi-calendar-clock-outline" size="18" />
+                      <span class="file-row-name">{{ task.name }}</span>
+                      <span class="file-row-meta">
+                        {{ task.enabled ? t("chat.scheduledTaskEnabled") : t("chat.scheduledTaskDisabled") }}
+                        ·
+                        {{ scheduledTaskRunLimitText(task) }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="files-selection" v-if="selectedScheduledTask">
+                  <div class="meta-row">
+                    <span>{{ t("chat.scheduledTaskName") }}</span>
+                    <code>{{ selectedScheduledTask.name }}</code>
+                  </div>
+                  <div class="meta-row mt-2">
+                    <span>{{ t("chat.scheduledTaskType") }}</span>
+                    <code>{{ selectedScheduledTask.task_type }}</code>
+                  </div>
+                  <div class="meta-row mt-2" v-if="selectedScheduledTask.task_type === 'hybrid_task'">
+                    <span>{{ t("chat.scheduledTaskScriptCommand") }}</span>
+                    <code>{{ selectedScheduledTask.script_command || "-" }}</code>
+                  </div>
+                  <div class="meta-row mt-2" v-if="selectedScheduledTask.task_type === 'skill_task'">
+                    <span>{{ t("chat.scheduledTaskSkillName") }}</span>
+                    <code>{{ selectedScheduledTask.skill_name || "-" }}</code>
+                  </div>
+                  <div class="meta-row mt-2" v-if="selectedScheduledTask.task_type === 'skill_task'">
+                    <span>{{ t("chat.scheduledTaskSkillInput") }}</span>
+                    <code>{{ selectedScheduledTask.skill_input || "-" }}</code>
+                  </div>
+                  <div class="meta-row mt-2">
+                    <span>{{ t("chat.scheduledTaskNextRun") }}</span>
+                    <code>{{ formatDateTime(selectedScheduledTask.next_run_at) }}</code>
+                  </div>
+                  <div class="meta-row mt-2" v-if="selectedScheduledTask.run_now_requested_at">
+                    <span>{{ t("chat.scheduledTaskRunNow") }}</span>
+                    <code>{{ formatDateTime(selectedScheduledTask.run_now_requested_at) }}</code>
+                  </div>
+                  <div class="meta-row mt-2">
+                    <span>{{ t("chat.scheduledTaskLastRun") }}</span>
+                    <code>{{ formatDateTime(selectedScheduledTask.last_run_at) }}</code>
+                  </div>
+                  <div class="meta-row mt-2">
+                    <span>{{ t("chat.scheduledTaskRunCount") }}</span>
+                    <code>{{ scheduledTaskRunLimitText(selectedScheduledTask) }}</code>
+                  </div>
+                  <div class="meta-row mt-2">
+                    <span>{{ t("chat.scheduledTaskSchedule") }}</span>
+                    <code v-if="selectedScheduledTask.schedule_type === 'cron'">
+                      cron: {{ selectedScheduledTask.cron_expr }} · {{ selectedScheduledTask.timezone }}
+                    </code>
+                    <code v-else>
+                      interval: {{ selectedScheduledTask.interval_minutes }}min · {{ selectedScheduledTask.timezone }}
+                    </code>
+                  </div>
+                  <div class="files-actions mt-3">
+                    <v-btn
+                      size="small"
+                      variant="outlined"
+                      prepend-icon="mdi-play-circle-outline"
+                      :disabled="scheduledTaskActionLoading"
+                      @click="executeSelectedScheduledTaskNow"
+                    >
+                      {{ t("chat.scheduledTaskRunNow") }}
+                    </v-btn>
+                    <v-btn
+                      v-if="!selectedScheduledTask.enabled"
+                      size="small"
+                      variant="outlined"
+                      prepend-icon="mdi-toggle-switch-outline"
+                      :disabled="scheduledTaskActionLoading"
+                      @click="setSelectedScheduledTaskEnabled(true)"
+                    >
+                      {{ t("chat.scheduledTaskEnable") }}
+                    </v-btn>
+                    <v-btn
+                      v-if="selectedScheduledTask.enabled"
+                      size="small"
+                      variant="outlined"
+                      prepend-icon="mdi-toggle-switch-off-outline"
+                      :disabled="scheduledTaskActionLoading"
+                      @click="setSelectedScheduledTaskEnabled(false)"
+                    >
+                      {{ t("chat.scheduledTaskDisable") }}
+                    </v-btn>
+                    <v-btn
+                      size="small"
+                      variant="outlined"
+                      prepend-icon="mdi-pencil-outline"
+                      :disabled="scheduledTaskActionLoading"
+                      @click="openEditScheduledTaskDialog"
+                    >
+                      {{ t("chat.scheduledTaskEdit") }}
+                    </v-btn>
+                    <v-btn
+                      size="small"
+                      variant="outlined"
+                      prepend-icon="mdi-delete-outline"
+                      color="error"
+                      :disabled="scheduledTaskActionLoading"
+                      @click="removeSelectedScheduledTask"
+                    >
+                      {{ t("chat.scheduledTaskDelete") }}
+                    </v-btn>
+                    <v-btn
+                      size="small"
+                      variant="outlined"
+                      prepend-icon="mdi-history"
+                      :loading="scheduledTaskRunsLoading"
+                      :disabled="scheduledTaskActionLoading"
+                      @click="loadSelectedScheduledTaskRuns"
+                    >
+                      {{ t("chat.scheduledTaskLoadRuns") }}
+                    </v-btn>
+                  </div>
+
+                  <div class="mt-3">
+                    <div class="meta-row mb-2">
+                      <span>{{ t("chat.scheduledTaskRecentRuns") }}</span>
+                    </div>
+                    <div v-if="scheduledTaskRuns.length === 0" class="files-empty py-2">
+                      {{ scheduledTaskRunsLoading ? t("chat.scheduledTaskRunsLoading") : t("chat.scheduledTaskRunsEmpty") }}
+                    </div>
+                    <div
+                      v-for="run in scheduledTaskRuns"
+                      :key="run.id"
+                      class="scheduled-run-item"
+                      @click="jumpToScheduledRunMessage(run)"
+                    >
+                      <div class="scheduled-run-head">
+                        <strong>{{ run.status }}</strong>
+                        <span>{{ formatDateTime(run.scheduled_for) }}</span>
+                      </div>
+                      <div class="scheduled-run-meta">
+                        exit={{ run.script_exit_code ?? "-" }}
+                      </div>
+                      <div class="scheduled-run-actions">
+                        <v-btn
+                          size="x-small"
+                          variant="text"
+                          color="secondary"
+                          prepend-icon="mdi-crosshairs-gps"
+                          @click.stop="jumpToScheduledRunMessage(run)"
+                        >
+                          {{ t("chat.scheduledTaskRunLocate") }}
+                        </v-btn>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </v-window-item>
+
+        </v-window>
+      </div>
+    </aside>
+  </div>
+
+  <v-dialog v-model="deleteFileDialogOpen" max-width="520">
+    <v-card>
+      <v-card-title>{{ t("chat.filesDeleteConfirmTitle") }}</v-card-title>
+      <v-card-text>
+        <div v-if="deleteTargetNode">
+          <p class="mb-2">{{ t("chat.filesDeleteConfirmHint", { name: deleteTargetNode.name }) }}</p>
+          <p v-if="requiresDeleteNameConfirm" class="mb-3">
+            {{ t("chat.filesDeleteTypeNameHint", { name: deleteTargetNode.name }) }}
+          </p>
+          <v-text-field
+            v-if="requiresDeleteNameConfirm"
+            v-model="deleteConfirmName"
+            :label="t('chat.filesDeleteTypeNameLabel')"
+            density="comfortable"
+            variant="outlined"
+            hide-details
+          />
+        </div>
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn variant="text" @click="closeDeleteFileNodeDialog">{{ t("common.cancel") }}</v-btn>
+        <v-btn color="error" :disabled="deleteConfirmDisabled" :loading="filesActionLoading" @click="confirmDeleteFileNode">
+          {{ t("chat.filesDeleteNow") }}
+        </v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
+
+  <v-dialog v-model="editFileDialogOpen" max-width="960">
+      <v-card>
+        <v-card-title>{{ t("chat.filesEditDialogTitle") }}</v-card-title>
+        <v-card-text>
+          <div class="panel-subtitle mb-2 d-flex align-center justify-space-between ga-2">
+            <code>{{ editFilePath }}</code>
+            <v-chip size="x-small" variant="tonal" color="secondary">{{ editFileLanguage }}</v-chip>
+          </div>
+          <MonacoTextEditor v-model="editFileContent" :language="editFileLanguage" />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+        <v-btn variant="text" @click="closeTextEditorDialog">{{ t("common.cancel") }}</v-btn>
+        <v-btn color="secondary" :loading="editFileSaving" @click="saveTextEditorContent">
+          {{ t("common.confirm") }}
+        </v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
+
+  <v-dialog v-model="viewFileDialogOpen" max-width="960">
+    <v-card>
+      <v-card-title>{{ t("chat.filesViewDialogTitle") }}</v-card-title>
+      <v-card-text>
+        <div class="panel-subtitle mb-2 d-flex align-center justify-space-between ga-2">
+          <code>{{ viewFilePath }}</code>
+          <v-chip v-if="viewFileMode === 'text'" size="x-small" variant="tonal" color="secondary">{{ viewFileLanguage }}</v-chip>
+        </div>
+        <div v-if="viewFileLoading" class="py-6 d-flex justify-center">
+          <v-progress-circular indeterminate color="secondary" />
+        </div>
+        <MonacoTextEditor
+          v-else-if="viewFileMode === 'text'"
+          v-model="viewFileTextContent"
+          :language="viewFileLanguage"
+          :read-only="true"
+        />
+        <div v-else class="files-view-image-wrap">
+          <img
+            class="files-view-image"
+            :src="fileNodeDownloadUrl(viewFilePath, viewFileName, true)"
+            :alt="viewFileName"
+          />
+        </div>
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn variant="text" @click="closeViewFileDialog">{{ t("common.close") }}</v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
+
+  <v-dialog v-model="fileOperationDialogOpen" max-width="520">
+    <v-card>
+      <v-card-title>{{ fileOperationDialogTitle }}</v-card-title>
+      <v-card-text>
+        <p class="mb-3">{{ fileOperationDialogHint }}</p>
+        <v-text-field
+          v-model="fileOperationInput"
+          :label="fileOperationInputLabel"
+          density="comfortable"
+          variant="outlined"
+          hide-details
+          @keydown.enter.prevent="submitFileOperationDialog"
+        />
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn variant="text" @click="closeFileOperationDialog">{{ t("common.cancel") }}</v-btn>
+        <v-btn color="secondary" :disabled="fileOperationConfirmDisabled" :loading="fileOperationSubmitting" @click="submitFileOperationDialog">
+          {{ t("common.confirm") }}
+        </v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
+
+  <v-dialog v-model="scheduledRunDetailDialogOpen" max-width="860">
+    <v-card>
+      <v-card-title>{{ t("chat.scheduledTaskRunDetailTitle") }}</v-card-title>
+      <v-card-text>
+        <div v-if="selectedScheduledRun" class="message-row role-assistant">
+          <div class="message-avatar avatar-assistant" title="TeamClaw Assistant">
+            <img
+              v-if="messageAvatarSrc('assistant')"
+              class="avatar-media"
+              :src="messageAvatarSrc('assistant') || ''"
+              alt="assistant avatar"
+            />
+            <span v-else>{{ messageAvatarText("assistant") }}</span>
+          </div>
+          <v-sheet class="message-bubble" :color="bubbleColor('assistant')" rounded="lg">
+            <v-chip size="x-small" color="secondary" variant="tonal" class="mb-2">
+              {{ t("chat.scheduledTaskResultTag") }}
+            </v-chip>
+            <div class="bubble-text markdown-content" v-html="scheduledRunDetailHtml()"></div>
+
+            <div class="message-meta mt-2">
+              {{ t("chat.scheduledTaskRunStatus") }}: {{ selectedScheduledRun.status }} ·
+              {{ formatDateTime(selectedScheduledRun.scheduled_for) }} ·
+              exit={{ selectedScheduledRun.script_exit_code ?? "-" }}
+            </div>
+
+            <div v-if="scheduledRunDetailToolCalls.length > 0" class="tool-trace mt-3">
+              <v-sheet
+                v-for="tool in scheduledRunDetailToolCalls"
+                :key="`${selectedScheduledRun.id}-${tool.id}`"
+                class="tool-item"
+                rounded="sm"
+                color="rgba(17,24,39,0.04)"
+              >
+                <div class="tool-item-head">
+                  <span class="tool-dot"></span>
+                  <code class="tool-call">{{ tool.display }}</code>
+                  <v-chip
+                    v-if="tool.hasResult"
+                    size="x-small"
+                    :color="tool.status === 'error' ? 'error' : 'success'"
+                    variant="flat"
+                  >
+                    {{ toolStatusLabel(tool.status) }}
+                  </v-chip>
+                </div>
+                <div v-if="toolCallMetaText(tool)" class="tool-time">
+                  {{ toolCallMetaText(tool) }}
+                </div>
+                <div v-if="tool.hasResult" class="tool-item-body">
+                  <pre class="tool-output">{{ visibleToolOutput(tool) }}</pre>
+                  <v-btn
+                    v-if="isCollapsible(tool)"
+                    size="small"
+                    variant="text"
+                    color="primary"
+                    @click="tool.expanded = !tool.expanded"
+                  >
+                    {{ tool.expanded ? t("chat.collapse") : t("chat.expand") }}
+                  </v-btn>
+                </div>
+              </v-sheet>
+            </div>
+            <div v-else class="files-empty py-2">
+              {{ t("chat.scheduledTaskRunNoTools") }}
+            </div>
+          </v-sheet>
+        </div>
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn variant="text" @click="closeScheduledRunDetailDialog">{{ t("common.close") }}</v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
+
+  <v-dialog v-model="scheduledTaskDialogOpen" max-width="820">
+    <v-card>
+      <v-card-title>
+        {{ scheduledTaskDialogMode === "create" ? t("chat.scheduledTaskCreate") : t("chat.scheduledTaskEdit") }}
+      </v-card-title>
+      <v-card-text>
+        <v-text-field
+          v-model="scheduledTaskFormName"
+          :label="t('chat.scheduledTaskName')"
+          density="comfortable"
+          variant="outlined"
+          class="mb-3"
+        />
+        <v-select
+          v-model="scheduledTaskFormTaskType"
+          :items="[
+            { title: 'hybrid_task', value: 'hybrid_task' },
+            { title: 'skill_task', value: 'skill_task' },
+          ]"
+          item-title="title"
+          item-value="value"
+          :label="t('chat.scheduledTaskTaskType')"
+          density="comfortable"
+          variant="outlined"
+          class="mb-3"
+        />
+        <div class="text-caption text-medium-emphasis mb-3">
+          {{ scheduledTaskTaskTypeHelpText }}
+        </div>
+        <v-switch
+          v-model="scheduledTaskFormEnabled"
+          :label="t('chat.scheduledTaskEnabled')"
+          color="primary"
+          density="compact"
+          hide-details
+          class="mb-3"
+        />
+        <v-text-field
+          v-model.number="scheduledTaskFormMaxRuns"
+          type="number"
+          min="1"
+          step="1"
+          clearable
+          :label="t('chat.scheduledTaskMaxRuns')"
+          :hint="t('chat.scheduledTaskMaxRunsHint')"
+          persistent-hint
+          density="comfortable"
+          variant="outlined"
+          class="mb-3"
+        />
+        <v-select
+          v-model="scheduledTaskFormScheduleType"
+          :items="[{ title: 'cron', value: 'cron' }, { title: 'interval', value: 'interval' }]"
+          item-title="title"
+          item-value="value"
+          :label="t('chat.scheduledTaskScheduleType')"
+          density="comfortable"
+          variant="outlined"
+          class="mb-3"
+        />
+        <v-text-field
+          v-model="scheduledTaskFormTimezone"
+          :label="t('chat.scheduledTaskTimezone')"
+          density="comfortable"
+          variant="outlined"
+          class="mb-3"
+        />
+        <v-text-field
+          v-if="scheduledTaskFormScheduleType === 'cron'"
+          v-model="scheduledTaskFormCronExpr"
+          :label="t('chat.scheduledTaskCronExpr')"
+          density="comfortable"
+          variant="outlined"
+          class="mb-3"
+        />
+        <v-text-field
+          v-else
+          v-model.number="scheduledTaskFormIntervalMinutes"
+          type="number"
+          min="1"
+          step="1"
+          :label="t('chat.scheduledTaskIntervalMinutes')"
+          density="comfortable"
+          variant="outlined"
+          class="mb-3"
+        />
+        <v-textarea
+          v-if="scheduledTaskFormTaskType === 'hybrid_task'"
+          v-model="scheduledTaskFormScriptCommand"
+          :label="t('chat.scheduledTaskScriptCommand')"
+          rows="4"
+          auto-grow
+          variant="outlined"
+          class="mb-3"
+        />
+        <v-text-field
+          v-if="scheduledTaskFormTaskType === 'skill_task'"
+          v-model="scheduledTaskFormSkillName"
+          :label="t('chat.scheduledTaskSkillName')"
+          density="comfortable"
+          variant="outlined"
+          class="mb-3"
+        />
+        <v-textarea
+          v-if="scheduledTaskFormTaskType === 'skill_task'"
+          v-model="scheduledTaskFormSkillInput"
+          :label="t('chat.scheduledTaskSkillInput')"
+          :placeholder="t('chat.scheduledTaskSkillInputPlaceholder')"
+          :hint="t('chat.scheduledTaskSkillInputHint')"
+          persistent-hint
+          rows="3"
+          auto-grow
+          variant="outlined"
+          class="mb-3"
+        />
+        <v-textarea
+          v-model="scheduledTaskFormSummaryPrompt"
+          :label="t('chat.scheduledTaskSummaryPrompt')"
+          :placeholder="t('chat.scheduledTaskSummaryPromptPlaceholder')"
+          rows="3"
+          auto-grow
+          variant="outlined"
+        />
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn variant="text" @click="closeScheduledTaskDialog">{{ t("common.cancel") }}</v-btn>
+        <v-btn
+          color="secondary"
+          :disabled="scheduledTaskDialogConfirmDisabled"
+          :loading="scheduledTaskActionLoading"
+          @click="submitScheduledTaskDialog"
+        >
+          {{ t("common.confirm") }}
+        </v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
+
+  <v-snackbar
+    v-model="tipsOpen"
+    class="tips-snackbar"
+    :color="tipsColor"
+    timeout="2800"
+    location="top"
+    variant="flat"
+  >
+    {{ tipsText }}
+  </v-snackbar>
+</v-container>

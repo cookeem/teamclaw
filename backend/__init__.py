@@ -1,1 +1,0 @@
-"""TeamClaw backend package."""

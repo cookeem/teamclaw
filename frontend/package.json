@@ -1,0 +1,29 @@
+{
+  "name": "teamclaw",
+  "private": true,
+  "version": "v0.6.2",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.2.7",
+    "@fontsource/space-grotesk": "^5.2.10",
+    "@mdi/font": "^7.4.47",
+    "dompurify": "^3.2.6",
+    "markdown-it": "^14.1.0",
+    "monaco-editor": "^0.52.2",
+    "vue": "^3.5.22",
+    "vue-router": "^4.5.1",
+    "vuetify": "^3.10.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.1",
+    "sass": "^1.92.1",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.5",
+    "vue-tsc": "^3.0.7"
+  }
+}

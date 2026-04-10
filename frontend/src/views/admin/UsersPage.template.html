@@ -1,0 +1,288 @@
+<v-container class="page-wrap py-6" fluid>
+  <v-card class="panel-card pa-3">
+    <v-card-title class="d-flex align-center justify-space-between">
+      <span class="text-h6 font-weight-bold">{{ t("admin.users.title") }}</span>
+      <div class="d-flex align-center ga-2" style="width: min(100%, 520px)">
+        <v-text-field
+          v-model="search"
+          :label="t('admin.users.search')"
+          density="compact"
+          variant="outlined"
+          hide-details
+          style="max-width: 320px"
+          @keydown.enter="load"
+        />
+        <v-btn variant="flat" prepend-icon="mdi-account-plus-outline" @click="openCreate">
+          {{ t("admin.users.create") }}
+        </v-btn>
+      </div>
+    </v-card-title>
+
+    <v-data-table
+      :headers="headers"
+      :items="users"
+      item-value="id"
+      :loading="loading"
+      class="elevation-0"
+      density="comfortable"
+    >
+      <template #item.avatar="{ item }">
+        <v-avatar size="34">
+          <img v-if="userAvatarSrc(item)" class="avatar-media" :src="userAvatarSrc(item)" alt="user avatar" />
+          <span v-else>{{ userInitials(item) }}</span>
+        </v-avatar>
+      </template>
+      <template #item.time_info="{ item }">
+        <div class="d-flex flex-column ga-0 text-caption time-info-cell">
+          <div>
+            <strong>{{ t("admin.users.time.created") }}:</strong>
+            {{ fmt(item.created_at) }}
+          </div>
+          <div>
+            <strong>{{ t("admin.users.time.lastLogin") }}:</strong>
+            {{ fmtOptional(item.last_login_at) }}
+          </div>
+          <div>
+            <strong>{{ t("admin.users.time.lastActive") }}:</strong>
+            {{ fmtOptional(item.last_active_at) }}
+          </div>
+        </div>
+      </template>
+      <template #item.is_admin="{ item }">
+        <v-chip size="x-small" :color="item.is_admin ? 'success' : 'default'" variant="flat">
+          {{ item.is_admin ? t("admin.users.role.admin") : t("admin.users.role.user") }}
+        </v-chip>
+      </template>
+      <template #item.is_blocked="{ item }">
+        <v-chip size="x-small" :color="item.is_blocked ? 'error' : 'success'" variant="flat">
+          {{ item.is_blocked ? t("admin.users.status.blocked") : t("admin.users.status.active") }}
+        </v-chip>
+      </template>
+      <template #item.conversation_limit="{ item }">
+        <v-chip size="x-small" variant="tonal">
+          {{ formatConversationLimit(item.conversation_limit) }}
+        </v-chip>
+      </template>
+      <template #item.actions="{ item }">
+        <div class="d-flex align-center ga-1">
+          <v-btn size="small" variant="text" color="primary" @click="openEdit(item)">{{ t("admin.users.edit") }}</v-btn>
+          <v-btn
+            size="small"
+            variant="text"
+            color="error"
+            :loading="deletingUserId === item.id"
+            :disabled="deletingUserId.length > 0 || currentUserId === item.id"
+            @click="openDeleteDialog(item)"
+          >
+            {{ t("admin.users.delete") }}
+          </v-btn>
+        </div>
+      </template>
+    </v-data-table>
+
+    <v-alert v-if="errorText" type="error" variant="tonal" class="mt-3">{{ errorText }}</v-alert>
+  </v-card>
+
+  <v-dialog v-model="createDialog" max-width="760">
+    <v-card class="profile-dialog-card">
+      <v-card-title class="text-h6 font-weight-bold">{{ t("admin.createUser.title") }}</v-card-title>
+      <v-card-text class="d-flex flex-column ga-3 pt-3">
+        <v-text-field v-model="createForm.username" :label="t('admin.editUser.username')" variant="outlined" />
+        <v-text-field v-model="createForm.display_name" :label="t('admin.editUser.displayName')" variant="outlined" />
+        <v-text-field v-model="createForm.email" :label="t('profile.email')" variant="outlined" />
+        <v-switch v-model="createForm.is_admin" :label="t('admin.editUser.admin')" color="primary" inset hide-details />
+        <v-switch v-model="createForm.is_blocked" :label="t('admin.editUser.blocked')" color="error" inset hide-details />
+        <v-text-field
+          v-model="createForm.conversation_limit_input"
+          :label="t('admin.editUser.conversationLimit')"
+          :hint="t('admin.editUser.conversationLimitHint', { default: defaultUserConversationLimit })"
+          persistent-hint
+          variant="outlined"
+        />
+        <v-text-field
+          v-model="createForm.password"
+          :label="t('admin.createUser.password')"
+          type="password"
+          variant="outlined"
+        />
+        <v-text-field
+          v-model="createForm.confirm_password"
+          :label="t('admin.createUser.confirmPassword')"
+          type="password"
+          variant="outlined"
+        />
+
+        <v-alert v-if="createPasswordMismatch" type="warning" variant="tonal" density="compact">
+          {{ t("auth.passwordMismatch") }}
+        </v-alert>
+        <v-alert v-if="!createConversationLimitState.valid" type="warning" variant="tonal" density="compact">
+          {{ t("admin.editUser.conversationLimitInvalid") }}
+        </v-alert>
+        <v-alert v-if="createErrorText" type="error" variant="tonal" density="compact">
+          {{ createErrorText }}
+        </v-alert>
+      </v-card-text>
+      <v-card-actions class="px-6 pb-5">
+        <v-spacer />
+        <v-btn variant="text" @click="closeCreate">{{ t("common.close") }}</v-btn>
+        <v-btn variant="flat" :loading="creating" :disabled="!canCreate" @click="submitCreate">
+          {{ t("admin.createUser.create") }}
+        </v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
+
+  <v-dialog v-model="deleteDialog" max-width="460">
+    <v-card>
+      <v-card-title class="text-h6 font-weight-bold">{{ t("admin.users.delete") }}</v-card-title>
+      <v-card-text class="pt-2">
+        {{ t("admin.users.deleteConfirm", { username: deleteTargetUser?.username ?? "" }) }}
+      </v-card-text>
+      <v-card-actions class="px-6 pb-5">
+        <v-spacer />
+        <v-btn variant="text" :disabled="deletingUserId.length > 0" @click="closeDeleteDialog">
+          {{ t("common.cancel") }}
+        </v-btn>
+        <v-btn variant="flat" color="error" :loading="deletingUserId.length > 0" @click="confirmDeleteUser">
+          {{ t("common.confirm") }}
+        </v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
+
+  <v-dialog v-model="editDialog" max-width="760">
+    <v-card class="profile-dialog-card">
+      <v-card-title class="text-h6 font-weight-bold">{{ t("admin.editUser.title") }}</v-card-title>
+      <v-card-text class="d-flex flex-column ga-3 pt-3">
+        <v-text-field v-model="form.username" :label="t('admin.editUser.username')" variant="outlined" readonly />
+        <v-text-field v-model="form.display_name" :label="t('admin.editUser.displayName')" variant="outlined" />
+        <v-text-field v-model="form.email" :label="t('profile.email')" variant="outlined" />
+
+        <div class="profile-avatar-row">
+          <v-avatar size="72" class="profile-avatar-preview">
+            <img v-if="avatarPreviewSrc" class="avatar-media" :src="avatarPreviewSrc" alt="avatar preview" />
+            <span v-else>{{ userInitials(form) }}</span>
+          </v-avatar>
+          <div class="profile-avatar-fields">
+            <v-file-input
+              v-model="avatarFile"
+              :label="t('profile.avatar')"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              variant="outlined"
+              density="comfortable"
+              prepend-icon="mdi-camera"
+              show-size
+              hide-details
+              @update:model-value="onAvatarFileChange"
+            />
+            <div class="profile-avatar-tip">{{ t("profile.cropHint") }}</div>
+          </div>
+        </div>
+
+        <v-divider class="my-1" />
+        <v-switch
+          v-model="form.is_admin"
+          :label="t('admin.editUser.admin')"
+          color="primary"
+          inset
+          hide-details
+          :disabled="isEditingSelf"
+        />
+        <v-switch
+          v-model="form.is_blocked"
+          :label="t('admin.editUser.blocked')"
+          color="error"
+          inset
+          hide-details
+          :disabled="isEditingSelf"
+        />
+        <v-alert v-if="isEditingSelf" type="info" variant="tonal" density="compact">
+          {{ t("admin.editUser.selfAdminBlockLocked") }}
+        </v-alert>
+        <v-text-field
+          v-model="form.conversation_limit_input"
+          :label="t('admin.editUser.conversationLimit')"
+          :hint="t('admin.editUser.conversationLimitHint', { default: defaultUserConversationLimit })"
+          persistent-hint
+          variant="outlined"
+        />
+
+        <v-text-field
+          v-model="form.new_password"
+          :label="t('admin.editUser.newPassword')"
+          type="password"
+          variant="outlined"
+        />
+        <v-text-field
+          v-model="form.confirm_password"
+          :label="t('admin.editUser.confirmPassword')"
+          type="password"
+          variant="outlined"
+        />
+
+        <v-alert v-if="passwordMismatch" type="warning" variant="tonal" density="compact">
+          {{ t("auth.passwordMismatch") }}
+        </v-alert>
+        <v-alert v-if="!editConversationLimitState.valid" type="warning" variant="tonal" density="compact">
+          {{ t("admin.editUser.conversationLimitInvalid") }}
+        </v-alert>
+        <v-alert v-if="editErrorText" type="error" variant="tonal" density="compact">
+          {{ editErrorText }}
+        </v-alert>
+        <v-alert v-if="editSuccessText" type="success" variant="tonal" density="compact">
+          {{ editSuccessText }}
+        </v-alert>
+      </v-card-text>
+      <v-card-actions class="px-6 pb-5">
+        <v-spacer />
+        <v-btn variant="text" @click="closeEdit">{{ t("common.close") }}</v-btn>
+        <v-btn variant="flat" :loading="saving" :disabled="!canSave" @click="saveEdit">
+          {{ t("admin.editUser.save") }}
+        </v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
+
+  <v-dialog v-model="avatarCropDialog" max-width="980">
+    <v-card class="avatar-crop-card">
+      <v-card-title class="text-h6 font-weight-bold">{{ t("profile.cropTitle") }}</v-card-title>
+      <v-card-text>
+        <div class="profile-avatar-tip mb-3">{{ t("profile.cropHint") }}</div>
+        <div
+          class="avatar-crop-stage"
+          @pointermove="onAvatarCropPointerMove"
+          @pointerup="stopAvatarCropDrag"
+          @pointercancel="stopAvatarCropDrag"
+          @pointerleave="stopAvatarCropDrag"
+        >
+          <div class="avatar-crop-canvas">
+            <img
+              v-if="avatarCropImageUrl"
+              ref="avatarCropImageRef"
+              class="avatar-crop-image"
+              :src="avatarCropImageUrl"
+              alt="avatar to crop"
+              draggable="false"
+              @load="onAvatarImageLoaded"
+            />
+            <div class="avatar-crop-rect" :style="avatarCropRectStyle" @pointerdown.prevent="startAvatarCropDrag" />
+          </div>
+        </div>
+        <v-slider
+          v-model="avatarCropScale"
+          :label="t('profile.cropScale')"
+          min="35"
+          max="95"
+          step="1"
+          hide-details
+          class="mt-4"
+        />
+      </v-card-text>
+      <v-card-actions class="px-6 pb-5">
+        <v-spacer />
+        <v-btn variant="text" @click="closeCropDialog">{{ t("common.cancel") }}</v-btn>
+        <v-btn variant="flat" @click="confirmAvatarCrop">{{ t("common.confirm") }}</v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
+</v-container>

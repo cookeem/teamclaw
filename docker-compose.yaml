@@ -18,13 +18,18 @@ services:
       timeout: 5s
       retries: 10
 
+
   docker-0.docker:
-    image: docker:29.3.0-dind-alpine3.23
+    image: teamclaw-dind:local
+    build:
+      context: .
+      dockerfile: docker/dind/Dockerfile
     container_name: teamclaw-docker-0
     privileged: true
     restart: unless-stopped
     environment:
       DOCKER_TLS_CERTDIR: ""
+      TZ: Asia/Shanghai
     command:
       - --host=tcp://0.0.0.0:2376
       - --tlsverify
@@ -35,18 +40,23 @@ services:
       - "12376:2376"
     volumes:
       - ./certs:/certs:ro
-      - ./workspaces:/workspaces
-      - ./skills/agent:/agent_skills
       - ./skills-builtin:/skills-builtin:ro
+      - ./workspaces:/workspaces
+      - ./skills:/skills
+      - ./data/sandbox:/root/sandbox
 
 
   docker-1.docker:
-    image: docker:29.3.0-dind-alpine3.23
+    image: teamclaw-dind:local
+    build:
+      context: .
+      dockerfile: docker/dind/Dockerfile
     container_name: teamclaw-docker-1
     privileged: true
     restart: unless-stopped
     environment:
       DOCKER_TLS_CERTDIR: ""
+      TZ: Asia/Shanghai
     command:
       - --host=tcp://0.0.0.0:2376
       - --tlsverify
@@ -57,9 +67,11 @@ services:
       - "12377:2376"
     volumes:
       - ./certs:/certs:ro
-      - ./workspaces:/workspaces
-      - ./skills/agent:/agent_skills
       - ./skills-builtin:/skills-builtin:ro
+      - ./workspaces:/workspaces
+      - ./skills:/skills
+      - ./data/sandbox:/root/sandbox
+
 
   # teamclaw:
   #   image: cookeem/teamclaw:v0.5.0
